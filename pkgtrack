@@ -1,0 +1,96 @@
+#!/bin/bash
+set -e
+
+DATA_DIR="$HOME/.local/share/pkgtrack"
+SNAP_DIR="$DATA_DIR/snaps"
+mkdir -p "$SNAP_DIR"
+
+BEFORE="$DATA_DIR/pkg-before.txt"
+AFTER="$DATA_DIR/pkg-after.txt"
+DIFF="$DATA_DIR/pkg-diff.txt"
+
+case "$1" in
+  before)
+    sudo pacman -Qq | sort > "$BEFORE"
+    echo "📦 Package snapshot saved → $BEFORE"
+    ;;
+
+  after)
+    if [ ! -f "$BEFORE" ]; then
+      echo "❌ No previous snapshot found. Run 'pkgtrack before' first."
+      exit 1
+    fi
+    sudo pacman -Qq | sort > "$AFTER"
+    comm -13 "$BEFORE" "$AFTER" > "$DIFF"
+    echo "🆕 New packages since last snapshot:"
+    if [ -s "$DIFF" ]; then
+      cat "$DIFF"
+    else
+      echo "No new packages."
+    fi
+    ;;
+
+  rollback)
+    if [ ! -s "$DIFF" ]; then
+      echo "❌ No diff found. Run 'pkgtrack after' first."
+      exit 1
+    fi
+    echo "⚠️ The following packages will be removed:"
+    cat "$DIFF"
+    echo
+    read -p "Proceed with removal? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      sudo pacman -Rns --noconfirm $(cat "$DIFF")
+      echo "🧹 Rollback complete."
+
+      mv "$BEFORE" "$BEFORE.old" 2>/dev/null || true
+      mv "$AFTER" "$AFTER.old" 2>/dev/null || true
+      mv "$DIFF" "$DIFF.old" 2>/dev/null || true
+      echo "📁 Old snapshot files renamed to *.old"
+    else
+      echo "❎ Rollback cancelled."
+    fi
+    ;;
+
+  snap)
+    PKG="$2"
+    if [ -z "$PKG" ]; then
+      echo "Usage: pkgtrack snap <package>"
+      exit 1
+    fi
+    if [ ! -s "$DIFF" ]; then
+      echo "❌ No diff found. Run 'pkgtrack after' first."
+      exit 1
+    fi
+    FILE="$SNAP_DIR/${PKG}.txt"
+    cp "$DIFF" "$FILE"
+    echo "📸 Snapshot for '$PKG' saved → $FILE"
+    ;;
+
+  remove)
+    PKG="$2"
+    if [ -z "$PKG" ]; then
+      echo "Usage: pkgtrack remove <package>"
+      exit 1
+    fi
+    FILE="$SNAP_DIR/${PKG}.txt"
+    if [ ! -f "$FILE" ]; then
+      echo "❌ No snapshot found for '$PKG'."
+      exit 1
+    fi
+    echo "⚠️ The following packages will be removed:"
+    cat "$FILE"
+    echo
+    read -p "Proceed with removal? [y/N]: " confirm
+    if [[ "$confirm" =~ ^[Yy]$ ]]; then
+      sudo pacman -Rns --noconfirm $(cat "$FILE")
+      echo "🧹 Snapshot '$PKG' removed successfully."
+    else
+      echo "❎ Removal cancelled."
+    fi
+    ;;
+
+  *)
+    echo "Usage: pkgtrack before|after|rollback|snap <pkg>|remove <pkg>"
+    ;;
+esac
